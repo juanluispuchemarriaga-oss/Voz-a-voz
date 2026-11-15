@@ -1,0 +1,39 @@
+name: Build APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Instalar dependencias
+        run: npm install
+      - name: Copiar PeerJS a la app
+        run: cp node_modules/peerjs/dist/peerjs.min.js www/peerjs.min.js
+      - name: Crear proyecto Android
+        run: npx cap add android
+      - name: Permisos de micrófono
+        run: |
+          sed -i 's#<application#<uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <application#' android/app/src/main/AndroidManifest.xml
+      - name: Generar iconos (si subiste assets/icon-only.png)
+        run: |
+          if [ -f assets/icon-only.png ]; then
+            npx capacitor-assets generate --android --iconBackgroundColor "#5865f2" --iconBackgroundColorDark "#1e1f2b"
+          fi
+      - name: Sincronizar
+        run: npx cap sync android
+      - name: Compilar APK
+        run: cd android && chmod +x gradlew && ./gradlew assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VozaVoz-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
