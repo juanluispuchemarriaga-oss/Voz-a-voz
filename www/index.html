@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voz a Voz</title>
+<style>
+:root{--bg:#f4f5fb;--card:#fff;--tx:#1b1d2a;--mut:#6b7087;--ac:#5865f2;--ok:#23a55a;--bad:#e5484d;--bd:#dfe2ef;--sea1:#c9ecff;--sea2:#fff1d0;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#1e1f2b;--card:#2b2d3d;--tx:#eef0ff;--mut:#9aa0bd;--bd:#3b3e55;--sea1:#14405a;--sea2:#4d4129}}
+html{height:100%}
+body{min-height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:20px;padding:24px;width:100%;max-width:380px;text-align:center;transition:background .6s}
+.card.ring{background:linear-gradient(180deg,var(--sea1),var(--sea2))}
+h1{font-size:22px;margin:0 0 4px}
+.s{color:var(--mut);font-size:14px;margin:0 0 14px}
+input{width:100%;box-sizing:border-box;padding:13px 14px;margin-bottom:10px;border-radius:12px;border:1px solid var(--bd);background:var(--bg);color:var(--tx);font-size:16px}
+button{width:100%;padding:14px;border:0;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;background:var(--ac);color:#fff;margin-top:4px}
+button:disabled{opacity:.6}
+button.red{background:var(--bad)}button.gray{background:var(--bd);color:var(--tx)}
+.row{display:flex;gap:10px}.row>*{flex:1}.row>.fit{flex:none;width:auto;padding:0 16px;margin-bottom:10px}
+.pair{display:flex;justify-content:center;gap:22px;align-items:flex-end;margin:6px 0 10px}
+.pair small{display:block;color:var(--mut);font-size:13px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.av{width:84px;height:84px;border-radius:50%;background:var(--ac);color:#fff;font-size:34px;font-weight:700;display:flex;align-items:center;justify-content:center;margin:0 auto 4px;transition:box-shadow .15s}
+.av.sm{width:56px;height:56px;font-size:22px;background:var(--mut)}
+.av.talk{box-shadow:0 0 0 6px var(--ok)}
+.ring .av:not(.sm):not(.talk){animation:pulse 1.8s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(88,101,242,.55)}100%{box-shadow:0 0 0 22px rgba(88,101,242,0)}}
+.wv{font-size:26px;height:34px;animation:bob 3s ease-in-out infinite}
+@keyframes bob{50%{transform:translateY(-4px)}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+#st{font-size:15px;margin:4px 0 2px;min-height:22px}
+#tm{margin:0 0 8px;min-height:18px}
+a{color:var(--ac);cursor:pointer;text-decoration:underline}
+#log{text-align:left;font-size:14px;max-height:110px;overflow-y:auto;margin:12px 0 8px;overflow-wrap:anywhere}
+#log b{color:var(--ac)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div id="v1">
+    <h1>🎙️ Voz a Voz</h1>
+    <p class="s">Llamada de voz en vivo. Entra a una sala con su clave y habla con quien la comparta.</p>
+    <input id="me" placeholder="Tu nombre" autocomplete="off" maxlength="20">
+    <div class="row">
+      <input id="key" placeholder="Clave de la sala" autocomplete="off" maxlength="30" autocapitalize="none">
+      <button class="gray fit" id="gen" title="Generar una clave nueva">🎲</button>
+    </div>
+    <button id="go">Entrar a la sala</button>
+    <p id="err" class="s" style="margin-top:12px;color:var(--bad)"></p>
+    <p class="s">Necesitas internet (WiFi o datos). Comparte la clave solo con quien quieras que entre.</p>
+  </div>
+  <div id="v2" class="hide">
+    <div class="wv" id="wv">🌊 🏖️ 🌴</div>
+    <div class="pair">
+      <div><div class="av sm" id="mav">T</div><small>Tú</small></div>
+      <div><div class="av" id="av">?</div><small id="peerName">Esperando…</small></div>
+    </div>
+    <div id="st"></div>
+    <p class="s" id="tm"></p>
+    <p class="s">Clave: <b id="keyShow"></b> · <a id="cp" role="button" tabindex="0">Copiar</a></p>
+    <div class="row">
+      <button class="gray" id="mute">Silenciar</button>
+      <button class="red" id="end">Colgar</button>
+    </div>
+    <button class="gray hide" id="tonebtn">🔇 Silenciar tono de playa</button>
+    <div id="log" aria-live="polite"></div>
+    <div class="row">
+      <input id="msg" placeholder="Escribe un mensaje" autocomplete="off" maxlength="300">
+      <button class="fit" id="snd">Enviar</button>
+    </div>
+  </div>
+  <audio id="aud" autoplay playsinline></audio>
+</div>
+<script src="peerjs.min.js"></script>
+<script>
+const $=id=>document.getElementById(id);
+const st=t=>$("st").textContent=t;
+let peer,stream,call,conn,me,base,role,pn="",on=false,tmr,t0,vad1,vad2,muted=false,rt;
+
+/* ---------- Audio ---------- */
+let actx;
+function ac(){actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==="suspended")actx.resume();return actx}
+function lvl(s,cb){
+  try{const c=ac(),an=c.createAnalyser();an.fftSize=256;c.createMediaStreamSource(s).connect(an);
+  const b=new Uint8Array(an.frequencyBinCount);
+  return setInterval(()=>{an.getByteFrequencyData(b);cb(b.reduce((a,x)=>a+x,0)/b.length>18)},150)}catch(e){}
+}
+function pluck(c,f,t,v,out){
+  const o=c.createOscillator(),o2=c.createOscillator(),g=c.createGain(),g2=c.createGain(),lp=c.createBiquadFilter();
+  o.type="triangle";o2.type="sine";o.frequency.value=f;o2.frequency.value=f*2;g2.gain.value=.3;
+  lp.type="lowpass";lp.frequency.value=2600;
+  g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(v,t+.01);g.gain.exponentialRampToValueAtTime(.001,t+1.1);
+  o.connect(g);o2.connect(g2).connect(g);g.connect(lp).connect(out);
+  o.start(t);o2.start(t);o.stop(t+1.2);o2.stop(t+1.2);
+}
+const Beach=(()=>{
+  let m,nodes=[],si,gt,nextT=0,bar=0,go=false,buf;
+  const N=[261.6,293.7,329.6,392,440,523.3,587.3,659.3];
+  const P=[[2,4,5,4,2,3,1,0],[4,5,7,5,4,2,3,-1],[5,7,5,4,2,4,2,0],[3,4,5,6,5,4,2,-1]];
+  const BASS=[130.8,196,220,196];
+  function nbuf(c){const b=c.createBuffer(1,c.sampleRate*3,c.sampleRate),d=b.getChannelData(0);let l=0;
+    for(let i=0;i<d.length;i++){l=(l+.02*(Math.random()*2-1))/1.02;d[i]=l*3.5}return b}
+  function wave(c,type,f,q,base,depth,rate){
+    const s=c.createBufferSource();s.buffer=buf;s.loop=true;
+    const fl=c.createBiquadFilter();fl.type=type;fl.frequency.value=f;fl.Q.value=q;
+    const g=c.createGain();g.gain.value=base;
+    const l=c.createOscillator(),lg=c.createGain();l.frequency.value=rate;lg.gain.value=depth;
+    l.connect(lg).connect(g.gain);s.connect(fl).connect(g).connect(m);s.start();l.start();return[s,l];
+  }
+  function playBar(c,t){
+    P[bar%4].forEach((n,i)=>{if(n>=0)pluck(c,N[n],t+i*.28,i%2?.16:.24,m)});
+    pluck(c,BASS[bar%4],t,.22,m);bar++;
+  }
+  function gull(c){
+    if(!go)return;
+    const t=c.currentTime+.05,n=2+Math.floor(Math.random()*2);
+    const pn=c.createStereoPanner?c.createStereoPanner():c.createGain();
+    if(pn.pan)pn.pan.value=Math.random()*1.6-.8;pn.connect(m);
+    for(let i=0;i<n;i++){
+      const s=t+i*.42,o=c.createOscillator(),g=c.createGain(),bp=c.createBiquadFilter(),vb=c.createOscillator(),vg=c.createGain();
+      const b=1500+Math.random()*400;o.type="sawtooth";
+      o.frequency.setValueAtTime(b,s);o.frequency.linearRampToValueAtTime(b*1.6,s+.14);o.frequency.linearRampToValueAtTime(b*1.05,s+.38);
+      vb.frequency.value=38;vg.gain.value=40;vb.connect(vg).connect(o.frequency);
+      bp.type="bandpass";bp.frequency.value=2200;bp.Q.value=2.5;
+      g.gain.setValueAtTime(0,s);g.gain.linearRampToValueAtTime(.08,s+.05);g.gain.linearRampToValueAtTime(0,s+.4);
+      o.connect(bp).connect(g).connect(pn);
+      o.start(s);vb.start(s);o.stop(s+.42);vb.stop(s+.42);
+    }
+  }
+  return{
+    start(){
+      if(go)return;go=true;const c=ac();buf=buf||nbuf(c);
+      m=c.createGain();m.gain.value=0;m.connect(c.destination);m.gain.linearRampToValueAtTime(.9,c.currentTime+1.5);
+      nodes=[...wave(c,"lowpass",500,.7,.3,.25,.09),...wave(c,"bandpass",2500,.7,.05,.05,.11),...wave(c,"highpass",5000,.5,.012,.01,.13)];
+      nextT=c.currentTime+.3;bar=0;
+      si=setInterval(()=>{while(nextT<c.currentTime+1){playBar(c,nextT);nextT+=2.24}},400);
+      gt=setTimeout(function f(){gull(c);gt=setTimeout(f,4000+Math.random()*6000)},1500);
+    },
+    stop(){
+      if(!go)return;go=false;clearInterval(si);clearTimeout(gt);
+      const c=actx,mm=m,ns=nodes;mm.gain.cancelScheduledValues(c.currentTime);
+      mm.gain.setValueAtTime(mm.gain.value,c.currentTime);mm.gain.linearRampToValueAtTime(0,c.currentTime+.8);
+      setTimeout(()=>{ns.forEach(n=>{try{n.stop()}catch(e){}});mm.disconnect()},1000);
+    }
+  };
+})();
+function chime(){const c=ac(),o=c.createGain();o.gain.value=.9;o.connect(c.destination);
+  [523.3,659.3,784].forEach((f,i)=>pluck(c,f,c.currentTime+i*.13,.3,o))}
+
+/* ---------- Pantallas ---------- */
+function show(c){$("v1").classList.toggle("hide",c);$("v2").classList.toggle("hide",!c)}
+function waiting(w){
+  $("card").classList.toggle("ring",w);$("tonebtn").classList.toggle("hide",!w);$("wv").classList.toggle("hide",!w);
+  if(w)Beach.start();else Beach.stop();
+}
+function label(){const n=pn||"Esperando…";$("peerName").textContent=n;$("av").textContent=pn?pn.charAt(0).toUpperCase():"?"}
+function addLine(who,text){
+  const d=document.createElement("div"),b=document.createElement("b");
+  b.textContent=who+": ";d.append(b,document.createTextNode(text));
+  const l=$("log");l.appendChild(d);l.scrollTop=l.scrollHeight;
+}
+function micMsg(e){
+  const n=e&&e.name;
+  if(!navigator.mediaDevices)return "Este dispositivo no permite usar el micrófono aquí.";
+  if(n==="NotAllowedError"||n==="SecurityError")return "Permiso del micrófono denegado. Actívalo en Ajustes → Apps → Voz a Voz → Permisos.";
+  if(n==="NotFoundError"||n==="OverconstrainedError")return "No encontré ningún micrófono. Conecta uno e inténtalo otra vez.";
+  if(n==="NotReadableError"||n==="AbortError")return "Otra app está usando el micrófono. Ciérrala e inténtalo otra vez.";
+  return "No pude usar el micrófono ("+(n||"error desconocido")+").";
+}
+
+/* ---------- Entrar a la sala ---------- */
+async function roomId(k){
+  const s="voz-a-voz:"+k;let h;
+  try{const b=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));
+    h=[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("")}
+  catch(e){let n=5381;for(const ch of s)n=((n*33)^ch.charCodeAt(0))>>>0;h=n.toString(16).padStart(8,"0")}
+  return "vz"+h.slice(0,24);
+}
+$("gen").onclick=()=>{const a=new Uint8Array(6);crypto.getRandomValues(a);
+  $("key").value=[...a].map(x=>"abcdefghjkmnpqrstuvwxyz23456789"[x%31]).join("")};
+try{$("me").value=localStorage.getItem("vv-name")||""}catch(e){}
+
+$("go").onclick=async()=>{
+  const err=t=>$("err").textContent=t;err("");
+  ac();
+  const nm=$("me").value.trim().slice(0,20),k=$("key").value.trim().toLowerCase();
+  if(!nm){err("Escribe tu nombre.");return}
+  if(k.length<4){err("La clave debe tener al menos 4 caracteres.");return}
+  if(typeof Peer==="undefined"){err("Falta PeerJS. Revisa que el APK se compiló con el paso «Copiar PeerJS».");return}
+  $("go").disabled=true;
+  try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}})}
+  catch(e){$("go").disabled=false;err(micMsg(e));return}
+  try{localStorage.setItem("vv-name",nm)}catch(e){}
+  me=nm;pn="";on=false;base=await roomId(k);
+  $("keyShow").textContent=k;$("mav").textContent=nm.charAt(0).toUpperCase();$("log").textContent="";
+  label();show(true);waiting(true);st("Buscando la sala…");
+  vad1=lvl(stream,v=>$("mav").classList.toggle("talk",v&&!muted));
+  join("a");
+};
+
+/* ---------- Conexión (PeerJS) ---------- */
+function closePeer(){
+  clearTimeout(rt);
+  if(peer){peer.removeAllListeners&&peer.removeAllListeners();try{peer.destroy()}catch(e){}peer=null}
+  call=null;conn=null;
+}
+function join(r){
+  closePeer();role=r;
+  peer=new Peer(base+r);
+  peer.on("open",()=>{
+    if(r==="a"){st("Sala lista. Esperando a que alguien entre con la clave…")}
+    else{
+      st("Llamando…");
+      hook(peer.call(base+"a",stream,{metadata:{n:me}}));
+      setConn(peer.connect(base+"a"));
+    }
+  });
+  peer.on("call",c=>{if(call){c.close();return}c.answer(stream);hook(c);if(c.metadata&&c.metadata.n){pn=String(c.metadata.n).slice(0,20);label()}});
+  peer.on("connection",c=>{if(!conn)setConn(c);else c.close()});
+  peer.on("disconnected",()=>{try{peer&&peer.reconnect()}catch(e){}});
+  peer.on("error",e=>{
+    if(e.type==="unavailable-id"){
+      if(r==="a")join("b");
+      else{closePeer();waiting(false);st("Esta sala ya tiene dos personas.")}
+    }else if(e.type==="peer-unavailable"){rt=setTimeout(()=>join("a"),1000)}
+    else if(["network","server-error","socket-error","socket-closed"].includes(e.type)){
+      st("Sin conexión con el servidor. Reintentando…");rt=setTimeout(()=>join(r),4000);
+    }
+  });
+}
+function hook(c){
+  call=c;
+  c.on("stream",s=>{
+    $("aud").srcObject=s;$("aud").play().catch(()=>{});
+    clearInterval(vad2);vad2=lvl(s,v=>$("av").classList.toggle("talk",v));
+    if(on)return;on=true;waiting(false);chime();label();
+    st("🟢 ¡Listo! Ya pueden hablar");
+    if(!tmr){t0=Date.now();tmr=setInterval(()=>{
+      const x=Math.floor((Date.now()-t0)/1000);
+      $("tm").textContent=String(Math.floor(x/60)).padStart(2,"0")+":"+String(x%60).padStart(2,"0");
+    },1000)}
+  });
+  c.on("close",left);c.on("error",left);
+}
+function left(){
+  if(!call&&!on)return;
+  const was=pn||"La otra persona";
+  call=null;conn=null;on=false;pn="";label();
+  clearInterval(tmr);tmr=null;$("tm").textContent="";clearInterval(vad2);$("av").classList.remove("talk");
+  $("aud").srcObject=null;
+  waiting(true);st("Se fue "+was+". Esperando…");
+  if(role==="b")rt=setTimeout(()=>join("a"),1000);
+}
+function setConn(c){
+  conn=c;
+  c.on("open",()=>c.send({t:"hi",n:me}));
+  c.on("data",d=>{
+    if(!d)return;
+    if(d.t==="hi"){pn=String(d.n||"Invitado/a").slice(0,20);label()}
+    else if(d.t==="chat"&&typeof d.text==="string")addLine(pn||"Invitado/a",d.text.slice(0,300));
+  });
+  c.on("close",()=>{if(conn===c)conn=null});
+}
+
+/* ---------- Chat y controles ---------- */
+function sendMsg(){
+  const t=$("msg").value.trim();if(!t)return;
+  if(conn&&conn.open){conn.send({t:"chat",text:t.slice(0,300)});addLine("Tú",t.slice(0,300));$("msg").value=""}
+  else addLine("Aviso","Aún no hay nadie conectado.");
+}
+$("snd").onclick=sendMsg;
+$("msg").onkeydown=e=>{if(e.key==="Enter")sendMsg()};
+$("mute").onclick=()=>{
+  muted=!muted;stream.getAudioTracks().forEach(t=>t.enabled=!muted);
+  $("mute").textContent=muted?"Activar micrófono":"Silenciar";
+};
+$("tonebtn").onclick=()=>{Beach.stop();$("tonebtn").classList.add("hide")};
+async function copyKey(){
+  try{await navigator.clipboard.writeText($("keyShow").textContent);$("cp").textContent="¡Copiada!"}catch(e){$("cp").textContent="Cópiala a mano"}
+  setTimeout(()=>$("cp").textContent="Copiar",2000);
+}
+$("cp").onclick=copyKey;$("cp").onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();copyKey()}};
+$("end").onclick=()=>{
+  clearInterval(tmr);clearInterval(vad1);clearInterval(vad2);tmr=null;
+  Beach.stop();closePeer();
+  if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;
+  $("aud").srcObject=null;muted=false;on=false;pn="";$("mute").textContent="Silenciar";$("tm").textContent="";
+  $("mav").classList.remove("talk");$("av").classList.remove("talk");$("card").classList.remove("ring");
+  $("go").disabled=false;show(false);
+};
+</script>
+</body>
+  </html>
+  
